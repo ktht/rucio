@@ -1470,31 +1470,34 @@ def list_rules(args):
     else:
         print('At least one option has to be given. Use -h to list the options.')
         return FAILURE
+    DEFAULT_COLUMNS = 'id,account,scope:name,state[locks_ok_cnt/locks_replicating_cnt/locks_stuck_cnt],rse_expression,copies,size,expires_at,created_at,comments'
+    HEADER_MAP = {
+        'locks_ok_cnt'          : 'OK',
+        'locks_replicating_cnt' : 'REPL',
+        'locks_stuck_cnt'       : 'STUCK',
+        'expires_at'            : 'EXPIRES (UTC)',
+        'created_at'            : 'CREATED (UTC)',
+    }
+    KEY_RGX = re.compile(r'\b[a-z_]+\b')
+    columns = args.columns if args.columns else DEFAULT_COLUMNS
+    column_fmts, column_headers = [], []
+    def fmt_rule(rule, column_key):
+        if column_key == 'size':
+            return sizefmt(rule['bytes'], args.human) if rule['bytes'] is not None else 'N/A'
+        return str(rule[column_key]) if rule[column_key] is not None else ''
+    for column_expr in columns.split(','):
+        column_keys = KEY_RGX.findall(column_expr)
+        fmt_string = KEY_RGX.sub('%s', column_expr)
+        column_fmts.append(lambda rule, fmt=fmt_string, cks=column_keys: fmt % tuple(fmt_rule(rule, ck) for ck in cks))
+        column_headers.append(fmt_string % tuple(HEADER_MAP[column_key] if column_key in HEADER_MAP else column_key.upper() for column_key in column_keys))
     if args.csv:
         for rule in rules:
-            print(rule['id'],
-                  rule['account'],
-                  '%s:%s' % (rule['scope'], rule['name']),
-                  '%s[%d/%d/%d]' % (rule['state'], rule['locks_ok_cnt'], rule['locks_replicating_cnt'], rule['locks_stuck_cnt']),
-                  rule['rse_expression'],
-                  rule['copies'],
-                  sizefmt(rule['bytes'], args.human) if rule['bytes'] is not None else 'N/A',
-                  rule['expires_at'],
-                  rule['created_at'],
-                  sep=',')
+            print(','.join(column_fmt(rule) for column_fmt in column_fmts))
     else:
         table = []
         for rule in rules:
-            table.append([rule['id'],
-                          rule['account'],
-                          '%s:%s' % (rule['scope'], rule['name']),
-                          '%s[%d/%d/%d]' % (rule['state'], rule['locks_ok_cnt'], rule['locks_replicating_cnt'], rule['locks_stuck_cnt']),
-                          rule['rse_expression'],
-                          rule['copies'],
-                          sizefmt(rule['bytes'], args.human) if rule['bytes'] is not None else 'N/A',
-                          rule['expires_at'],
-                          rule['created_at']])
-        print(tabulate(table, tablefmt='simple', headers=['ID', 'ACCOUNT', 'SCOPE:NAME', 'STATE[OK/REPL/STUCK]', 'RSE_EXPRESSION', 'COPIES', 'SIZE', 'EXPIRES (UTC)', 'CREATED (UTC)'], disable_numparse=True))
+            table.append([ column_fmt(rule) for column_fmt in column_fmts ])
+        print(tabulate(table, tablefmt='simple', headers=column_headers, disable_numparse=True))
     return SUCCESS
 
 
@@ -2429,6 +2432,7 @@ You can filter by account::
     list_rules_parser.add_argument('--file', dest='file', action='store', help='List associated rules of an affected file')
     list_rules_parser.add_argument('--account', dest='rule_account', action='store', help='List by account')
     list_rules_parser.add_argument('--subscription', dest='subscription', action='store', help='List by account and subscription name', metavar=('ACCOUNT', 'SUBSCRIPTION'), nargs=2)
+    list_rules_parser.add_argument('--columns', dest='columns', action='store', help='Comma-separated list of rule attributes')
 
     # The list_rules_history command
     list_rules_history_parser = subparsers.add_parser('list-rules-history', help='List replication rules history for a DID.')
